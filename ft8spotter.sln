@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.29102.190
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ft8spotter", "ft8spotter\ft8spotter.csproj", "{C85CCBC8-5FA8-44A7-8AC0-C31CF99DDAAD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C85CCBC8-5FA8-44A7-8AC0-C31CF99DDAAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C85CCBC8-5FA8-44A7-8AC0-C31CF99DDAAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C85CCBC8-5FA8-44A7-8AC0-C31CF99DDAAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C85CCBC8-5FA8-44A7-8AC0-C31CF99DDAAD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {422B7EC7-DA35-43ED-9699-670971F0ACDF}
+	EndGlobalSection
+EndGlobal

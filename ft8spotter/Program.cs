@@ -29,7 +29,8 @@ namespace ft8spotter
 
             if (!File.Exists(configFile))
             {
-                Console.WriteLine("Cloudlog connection string?");
+                Console.WriteLine("You need to provide a MySQL connection string, e.g. server=lamp;database=cloudlog;user id=cloudlog;password=abc123;");
+                Console.WriteLine("in order for ft8spotter to check spots against Cloudlog. Please provide it now...");
                 string cs = Console.ReadLine();
                 File.WriteAllText(configFile, $"{configKey}={cs}");
             }

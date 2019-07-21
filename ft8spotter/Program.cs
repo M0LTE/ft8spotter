@@ -19,6 +19,22 @@ namespace ft8spotter
         static ClublogCtyXml ctyXml;
         static void Main(string[] args)
         {
+            bool all = args.Any(a => a == "--all");
+
+            string bandArg = args.SingleOrDefault(a => a.EndsWith("m"));
+
+            if (string.IsNullOrWhiteSpace(bandArg) || !int.TryParse(bandArg.Substring(0, bandArg.Length - 1).Replace("--", ""), out int band))
+            {
+                band = 20;
+            }
+
+            Console.WriteLine($"Selected {band}m, specify (e.g.) --6m for another band");
+
+            if (!all)
+            {
+                Console.WriteLine("Only showing needed spots. Pass --all for all spots.");
+            }
+
             if (args.Any(a => a == "--help" || a == "-h" || a == "/?"))
             {
                 Console.WriteLine(@"A work in progress, that listens to udp://localhost:2237 for WSJT-X, works out the DXCC entity of every call 
@@ -37,8 +53,11 @@ namespace ft8spotter
 
             ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
 
-            using (var client = new UdpClient(2237, AddressFamily.InterNetwork))
+            const int port = 2237;
+            using (var client = new UdpClient(port, AddressFamily.InterNetwork))
             {
+                Console.WriteLine($"Listening for WSJT-X on UDP port {port}");
+
                 var sw = Stopwatch.StartNew();
                 while (true)
                 {
@@ -54,24 +73,37 @@ namespace ft8spotter
 
                         var entity = GetEntity(heardCall);
 
-                        if (sw.Elapsed > TimeSpan.FromSeconds(5))
-                        {
-                            Console.WriteLine("------------------------------------------------------");
-                            sw.Restart();
-                        }
+                        bool needed = entity == null ? false : GetNeeded(band, entity.Adif);
 
-                        bool needed = entity == null ? false : GetNeeded(20, entity.Adif);
-
-                        var colBefore = Console.ForegroundColor;
-                        if (needed)
+                        if (all || needed)
                         {
-                            Console.ForegroundColor = ConsoleColor.Red;
+                            if (sw.Elapsed > TimeSpan.FromSeconds(5))
+                            {
+                                Console.WriteLine($"---  {DateTime.Now:HH:mm:ss}  --------------------------");
+                                sw.Restart();
+                            }
+
+                            var colBefore = Console.ForegroundColor;
+                            if (needed)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Red;
+                            }
+                            Console.WriteLine($"{Pad(heardCall,10)} {entity?.Entity ?? "unknown"}");
+                            Console.ForegroundColor = colBefore;
                         }
-                        Console.WriteLine($"{heardCall} - {entity?.Entity ?? "unknown"}");
-                        Console.ForegroundColor = colBefore;
                     }
                 }
             }
+        }
+
+        private static string Pad(string heardCall, int v)
+        {
+            if (heardCall.Length >= v)
+            {
+                return heardCall.Substring(0, v);
+            }
+
+            return heardCall + new string(' ', v - heardCall.Length);
         }
 
         static string configFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ft8spotter", "config");

@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 
@@ -14,7 +15,8 @@ namespace ft8spotter
 {
     class Program
     {
-        private const string configKey = "cloudlog_connection_string";
+        private const string connectionStringKey = "cloudlog_connection_string";
+        private const string urlKey = "cloudlog_url";
 
         static ClublogCtyXml ctyXml;
         static void Main(string[] args)
@@ -43,13 +45,17 @@ namespace ft8spotter
                 return;
             }
 
-            if (!File.Exists(configFile))
+            if (!File.Exists(configFile) || File.ReadAllText(configFile).Contains(connectionStringKey))
             {
-                Console.WriteLine("You need to provide a MySQL connection string, e.g. server=lamp;database=cloudlog;user id=cloudlog;password=abc123;");
+                Console.WriteLine("You need to provide a Cloudlog URL, e.g. https://mycloudloginstance.net");
                 Console.WriteLine("in order for ft8spotter to check spots against Cloudlog. Please provide it now...");
-                string cs = Console.ReadLine();
-                File.WriteAllText(configFile, $"{configKey}={cs}");
+                string url = Console.ReadLine();
+                File.WriteAllText(configFile, $"{urlKey}={url}");
             }
+
+            var config = GetConfig();
+
+            cloudLogUri = new Uri(config[urlKey] + "/index.php/api/");
 
             ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
 
@@ -73,9 +79,11 @@ namespace ft8spotter
 
                         var entity = GetEntity(heardCall);
 
-                        bool needed = entity == null ? false : GetNeeded(band, entity.Adif);
+                        string grid = GetGrid(msg);
 
-                        if (all || needed)
+                        var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grid, "ft8");
+
+                        if (all || !Needed.No.Equals(needed))
                         {
                             if (sw.Elapsed > TimeSpan.FromSeconds(5))
                             {
@@ -84,11 +92,29 @@ namespace ft8spotter
                             }
 
                             var colBefore = Console.ForegroundColor;
-                            if (needed)
+                            if (needed.NewCountryOnBand)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                            }
+                            else if (needed.NewCountryOnBandOnMode)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                            }
+                            else if (needed.NewGridOnBand)
                             {
                                 Console.ForegroundColor = ConsoleColor.Red;
                             }
-                            Console.WriteLine($"{Pad(heardCall,10)} {entity?.Entity ?? "unknown"}");
+                            else if (needed.NewGridOnBandOnMode)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                            }
+                            WriteAtColumn(0, needed, 19);
+                            WriteAtColumn(19, heardCall, 10);
+                            WriteAtColumn(30, IsGrid(grid) ? grid : String.Empty, 4);
+                            WriteAtColumn(35, entity?.Adif, 3);
+                            WriteAtColumn(39, (entity?.Entity) ?? "Unknown", 50);
+                            
+                            Console.WriteLine();
                             Console.ForegroundColor = colBefore;
                         }
                     }
@@ -96,8 +122,101 @@ namespace ft8spotter
             }
         }
 
+        private static void WriteAtColumn(int col, object heardCall, int max)
+        {
+            Console.SetCursorPosition(col, Console.CursorTop);
+            string toWrite;
+            if (heardCall == null)
+            {
+                toWrite = "";
+            }
+            else
+            {
+                string str = heardCall.ToString();
+                if (str.Length <= max)
+                {
+                    toWrite = str;
+                }
+                else
+                {
+                    toWrite = str.Substring(0, max);
+                }
+            }
+            Console.Write(toWrite);
+        }
+
+        private static string GetGrid(byte[] msg)
+        {
+            string text;
+            try
+            {
+                text = Encoding.ASCII.GetString(msg.Skip(52).SkipLast(2).ToArray());
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            string[] split = text.Split(' ');
+
+            if (split.Length == 2 || split.Length == 3 || split.Length == 4)
+            {
+                string candidate = split.Last();
+
+                if (IsGrid(candidate))
+                {
+                    return candidate;
+                }
+                else
+                {
+                    if (Debugger.IsAttached && split.Any(s => IsGrid(s)))
+                    {
+                        Debugger.Break();
+                    }
+
+                    return null;
+                }
+            }
+            else
+            {
+                if (Debugger.IsAttached && split.Any(s => IsGrid(s)))
+                {
+                    Debugger.Break();
+                }
+
+                return null;
+            }
+        }
+
+        private static bool IsGrid(string v)
+        {
+            if (v == "RR73")
+                return false;
+
+            if (v == null || v.Length != 4)
+                return false;
+
+            if (!char.IsUpper(v[0]) || !char.IsUpper(v[1]))
+                return false;
+
+            if (!char.IsNumber(v[2]) || !char.IsNumber(v[3]))
+                return false;
+
+            return true;
+        }
+
         private static string Pad(string heardCall, int v)
         {
+            if (heardCall == null)
+            {
+                return new string(' ', v);
+            }
+
             if (heardCall.Length >= v)
             {
                 return heardCall.Substring(0, v);
@@ -112,31 +231,138 @@ namespace ft8spotter
         {
             if (cs == null)
             {
-                var configSettings = File.ReadAllLines(configFile)
-                    .Where(line => line.Contains("="))
-                    .Select(line => new { key = line.Substring(0, line.IndexOf("=")), value = line.Substring(line.IndexOf("=") + 1) })
-                    .Where(kvp => !String.IsNullOrWhiteSpace(kvp.key) && !String.IsNullOrWhiteSpace(kvp.value))
-                    .ToDictionary(line => line.key, line => line.value);
+                Dictionary<string, string> configSettings = GetConfig();
 
-                cs = configSettings[configKey];
+                cs = configSettings[connectionStringKey];
             }
 
             return new MySqlConnection(cs);
         }
 
-        private static bool GetNeeded(int band, int? adif)
+        private static Dictionary<string, string> config;
+        private static Dictionary<string, string> GetConfig()
+        {
+            if (config == null)
+            {
+                config = File.ReadAllLines(configFile)
+                                .Where(line => line.Contains("="))
+                                .Select(line => new { key = line.Substring(0, line.IndexOf("=")), value = line.Substring(line.IndexOf("=") + 1) })
+                                .Where(kvp => !String.IsNullOrWhiteSpace(kvp.key) && !String.IsNullOrWhiteSpace(kvp.value))
+                                .ToDictionary(line => line.key, line => line.value);
+            }
+
+            return config;
+        }
+
+        class Needed
+        {
+            public override bool Equals(object obj)
+            {
+                if (!(obj is Needed other))
+                {
+                    return false;
+                }
+
+                if (obj == null)
+                    return false;
+
+                return other.NewCountryOnBand == NewCountryOnBand
+                    && other.NewCountryOnBandOnMode == NewCountryOnBandOnMode
+                    && other.NewGridOnBand == NewGridOnBand
+                    && other.NewGridOnBandOnMode == NewGridOnBandOnMode;
+            }
+
+            public override int GetHashCode()
+            {
+                return NewCountryOnBand.GetHashCode() ^ NewCountryOnBandOnMode.GetHashCode() ^ NewGridOnBand.GetHashCode() ^ NewGridOnBandOnMode.GetHashCode();
+            }
+
+            public bool NewCountryOnBandOnMode { get; set; }
+            public bool NewCountryOnBand { get; set; }
+            public bool NewGridOnBand { get; set; }
+            public bool NewGridOnBandOnMode { get; set; }
+
+            public static Needed No { get { return new Needed(); } }
+
+            public override string ToString()
+            {
+                if (NewCountryOnBand)
+                {
+                    return "Country+Band";
+                }
+
+                if (NewCountryOnBandOnMode)
+                {
+                    return "Country+Band+Mode";
+                }
+
+                if (NewGridOnBand)
+                {
+                    return "Grid+Band";
+                }
+
+                if (NewGridOnBandOnMode)
+                {
+                    return "Grid+Band+Mode";
+                }
+
+                return null;
+            }
+        }
+
+        private static HttpClient httpClient = new HttpClient();
+        private static Uri cloudLogUri;
+        
+        private static Needed GetNeeded(int band, int? adif, string gridSquare, string mode)
         {
             if (!adif.HasValue)
-                return false;
+            {
+                return Needed.No;
+            }
 
             int dxcc = adif.Value;
 
-            using (var conn = GetConnection())
+            int qsosWithThatCountryOnThatBand = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"country_worked/{dxcc}/{band}m")).Result);
+
+
+            var result = new Needed();
+
+            if (qsosWithThatCountryOnThatBand == 0)
             {
-                conn.Open(); 
-                // and col_mode = @mode
-                return 0 == conn.ExecuteScalar<int>("select count(1) from TABLE_HRD_CONTACTS_V01 where col_dxcc=@dxcc and COL_BAND = @band", new { mode = "FT8", band = $"{band}M", dxcc });
+                result.NewCountryOnBand = true;
             }
+            else
+            {
+                int qsosWithThatCountryOnThatBandInThisMode = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"country_worked/{dxcc}/{band}m/{mode}")).Result);
+                if (qsosWithThatCountryOnThatBandInThisMode == 0)
+                {
+                    result.NewCountryOnBandOnMode = true;
+                }
+            }
+
+            if (!String.IsNullOrWhiteSpace(gridSquare) && gridSquare.Length >= 4)
+            {
+                if (gridSquare.Length > 4)
+                {
+                    gridSquare = gridSquare.Substring(0, 4);
+                }
+
+                int qsosWithThatGridOnThatBand = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"gridsquare_worked/{gridSquare}/{band}m")).Result);
+                if (qsosWithThatGridOnThatBand == 0)
+                {
+                    result.NewGridOnBand = true;
+                }
+                else
+                {
+                    int qsosWithThatGridOnThatBandInThisMode = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"gridsquare_worked/{gridSquare}/{band}m/{mode}")).Result);
+                    if (qsosWithThatGridOnThatBandInThisMode == 0)
+                    {
+                        result.NewGridOnBandOnMode = true;
+                    }
+                }
+            }
+
+            return result;
         }
 
         private static MatchingEntity GetEntity(string heardCall)
@@ -329,7 +555,19 @@ namespace ft8spotter
         public int? Adif { get; set; }
         public string Continent { get; set; }
         public int? CqZone { get; set; }
-        public string Entity { get; set; }
+        private string _entity;
+        public string Entity { get { return _entity; } set { _entity = Niceify(value); } }
+
+        private string Niceify(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return string.Join(' ', value.Split(' ').Select(word => word == "OF" ? "of" : $"{word[0].ToString().ToUpper()}{(word.Length == 1 ? "" : new String(word.Skip(1).ToArray()).ToLower())}"));
+        }
+
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
     }

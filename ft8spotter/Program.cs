@@ -55,7 +55,7 @@ namespace ft8spotter
 
             var config = GetConfig();
 
-            cloudLogUri = new Uri(config[urlKey] + "/index.php/api/");
+            cloudLogUri = new Uri(new Uri(config[urlKey]), "index.php/api/");
 
             ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
 

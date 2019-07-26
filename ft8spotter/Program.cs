@@ -10,6 +10,8 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ft8spotter
 {
@@ -22,6 +24,8 @@ namespace ft8spotter
         static void Main(string[] args)
         {
             bool all = args.Any(a => a == "--all");
+
+            bool grids = args.Any(a => a == "--grids");
 
             string bandArg = args.SingleOrDefault(a => a.EndsWith("m"));
 
@@ -81,7 +85,7 @@ namespace ft8spotter
 
                         string grid = GetGrid(msg);
 
-                        var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grid, "ft8");
+                        var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
 
                         if (all || !Needed.No.Equals(needed))
                         {
@@ -312,7 +316,40 @@ namespace ft8spotter
 
         private static HttpClient httpClient = new HttpClient();
         private static Uri cloudLogUri;
-        
+
+        private static string HttpGet(string url)
+        {
+            int delay = 100;
+
+            while (true)
+            {
+                try
+                {
+                    return httpClient.GetStringAsync(new Uri(cloudLogUri, url)).Result;
+                }
+                catch (Exception ex)
+                {
+                    string message;
+                    if (ex is AggregateException aggregateException)
+                    {
+                        message = String.Join(Environment.NewLine, aggregateException.InnerExceptions.Select(e => e.Message));
+                    }
+                    else
+                    {
+                        message = ex.Message;
+                    }
+
+                    Console.WriteLine(message);
+                    Thread.Sleep(delay);
+
+                    if (delay < TimeSpan.FromMinutes(1).TotalMilliseconds)
+                    {
+                        delay *= 2;
+                    }
+                }
+            }
+        }
+
         private static Needed GetNeeded(int band, int? adif, string gridSquare, string mode)
         {
             if (!adif.HasValue)
@@ -322,8 +359,7 @@ namespace ft8spotter
 
             int dxcc = adif.Value;
 
-            int qsosWithThatCountryOnThatBand = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"country_worked/{dxcc}/{band}m")).Result);
-
+            int qsosWithThatCountryOnThatBand = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m"));
 
             var result = new Needed();
 
@@ -333,7 +369,7 @@ namespace ft8spotter
             }
             else
             {
-                int qsosWithThatCountryOnThatBandInThisMode = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"country_worked/{dxcc}/{band}m/{mode}")).Result);
+                int qsosWithThatCountryOnThatBandInThisMode = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m/{mode}"));
                 if (qsosWithThatCountryOnThatBandInThisMode == 0)
                 {
                     result.NewCountryOnBandOnMode = true;
@@ -347,14 +383,14 @@ namespace ft8spotter
                     gridSquare = gridSquare.Substring(0, 4);
                 }
 
-                int qsosWithThatGridOnThatBand = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"gridsquare_worked/{gridSquare}/{band}m")).Result);
+                int qsosWithThatGridOnThatBand = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m"));
                 if (qsosWithThatGridOnThatBand == 0)
                 {
                     result.NewGridOnBand = true;
                 }
                 else
                 {
-                    int qsosWithThatGridOnThatBandInThisMode = int.Parse(httpClient.GetStringAsync(new Uri(cloudLogUri, $"gridsquare_worked/{gridSquare}/{band}m/{mode}")).Result);
+                    int qsosWithThatGridOnThatBandInThisMode = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m/{mode}"));
                     if (qsosWithThatGridOnThatBandInThisMode == 0)
                     {
                         result.NewGridOnBandOnMode = true;

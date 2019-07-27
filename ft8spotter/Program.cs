@@ -1,5 +1,4 @@
-﻿using Dapper;
-using MySql.Data.MySqlClient;
+﻿using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -11,7 +10,6 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace ft8spotter
 {
@@ -39,6 +37,11 @@ namespace ft8spotter
             if (!all)
             {
                 Console.WriteLine("Only showing needed spots. Pass --all for all spots.");
+            }
+
+            if (!grids)
+            {
+                Console.WriteLine("Not looking for unworked grids. Pass --grids to turn this on.");
             }
 
             if (args.Any(a => a == "--help" || a == "-h" || a == "/?"))
@@ -96,7 +99,11 @@ namespace ft8spotter
                             }
 
                             var colBefore = Console.ForegroundColor;
-                            if (needed.NewCountryOnBand)
+                            if (needed.NewCountryOnAnyBand)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Green;
+                            }
+                            else if (needed.NewCountryOnBand)
                             {
                                 Console.ForegroundColor = ConsoleColor.Yellow;
                             }
@@ -104,13 +111,17 @@ namespace ft8spotter
                             {
                                 Console.ForegroundColor = ConsoleColor.DarkYellow;
                             }
-                            else if (needed.NewGridOnBand)
+                            else if (needed.NewGridOnAnyBand)
                             {
                                 Console.ForegroundColor = ConsoleColor.Red;
                             }
+                            else if (needed.NewGridOnBand)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Magenta;
+                            }
                             else if (needed.NewGridOnBandOnMode)
                             {
-                                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
                             }
                             WriteAtColumn(0, needed, 19);
                             WriteAtColumn(19, heardCall, 10);
@@ -273,12 +284,15 @@ namespace ft8spotter
                 return other.NewCountryOnBand == NewCountryOnBand
                     && other.NewCountryOnBandOnMode == NewCountryOnBandOnMode
                     && other.NewGridOnBand == NewGridOnBand
-                    && other.NewGridOnBandOnMode == NewGridOnBandOnMode;
+                    && other.NewGridOnBandOnMode == NewGridOnBandOnMode
+                    && other.NewCountryOnAnyBand == NewCountryOnAnyBand
+                    && other.NewGridOnAnyBand == NewGridOnAnyBand;
             }
 
             public override int GetHashCode()
             {
-                return NewCountryOnBand.GetHashCode() ^ NewCountryOnBandOnMode.GetHashCode() ^ NewGridOnBand.GetHashCode() ^ NewGridOnBandOnMode.GetHashCode();
+                return NewCountryOnBand.GetHashCode() ^ NewCountryOnBandOnMode.GetHashCode() ^ NewGridOnBand.GetHashCode()
+                    ^ NewGridOnBandOnMode.GetHashCode() ^ NewCountryOnAnyBand.GetHashCode() ^ NewGridOnAnyBand.GetHashCode();
             }
 
             public bool NewCountryOnBandOnMode { get; set; }
@@ -288,8 +302,16 @@ namespace ft8spotter
 
             public static Needed No { get { return new Needed(); } }
 
+            public bool NewCountryOnAnyBand { get; set; }
+            public bool NewGridOnAnyBand { get; set; }
+
             public override string ToString()
             {
+                if (NewCountryOnAnyBand)
+                {
+                    return "Country";
+                }
+
                 if (NewCountryOnBand)
                 {
                     return "Country+Band";
@@ -298,6 +320,11 @@ namespace ft8spotter
                 if (NewCountryOnBandOnMode)
                 {
                     return "Country+Band+Mode";
+                }
+
+                if (NewGridOnAnyBand)
+                {
+                    return "Grid";
                 }
 
                 if (NewGridOnBand)
@@ -359,20 +386,29 @@ namespace ft8spotter
 
             int dxcc = adif.Value;
 
-            int qsosWithThatCountryOnThatBand = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m"));
+            int qsosWithThatCountryOnAnyBand = int.Parse(HttpGet($"country_worked/{dxcc}/all"));
 
             var result = new Needed();
 
-            if (qsosWithThatCountryOnThatBand == 0)
+            if (qsosWithThatCountryOnAnyBand == 0)
             {
-                result.NewCountryOnBand = true;
+                result.NewCountryOnAnyBand = true;
             }
             else
             {
-                int qsosWithThatCountryOnThatBandInThisMode = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m/{mode}"));
-                if (qsosWithThatCountryOnThatBandInThisMode == 0)
+                int qsosWithThatCountryOnCurrentBand = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m"));
+
+                if (qsosWithThatCountryOnCurrentBand == 0)
                 {
-                    result.NewCountryOnBandOnMode = true;
+                    result.NewCountryOnBand = true;
+                }
+                else
+                {
+                    int qsosWithThatCountryOnThatBandInThisMode = int.Parse(HttpGet($"country_worked/{dxcc}/{band}m/{mode}"));
+                    if (qsosWithThatCountryOnThatBandInThisMode == 0)
+                    {
+                        result.NewCountryOnBandOnMode = true;
+                    }
                 }
             }
 
@@ -383,17 +419,25 @@ namespace ft8spotter
                     gridSquare = gridSquare.Substring(0, 4);
                 }
 
-                int qsosWithThatGridOnThatBand = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m"));
-                if (qsosWithThatGridOnThatBand == 0)
+                int qsosWithThatGridOnAnyBand = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/all"));
+                if (qsosWithThatGridOnAnyBand == 0)
                 {
-                    result.NewGridOnBand = true;
+                    result.NewGridOnAnyBand = true;
                 }
                 else
                 {
-                    int qsosWithThatGridOnThatBandInThisMode = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m/{mode}"));
-                    if (qsosWithThatGridOnThatBandInThisMode == 0)
+                    int qsosWithThatGridOnThatBand = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m"));
+                    if (qsosWithThatGridOnThatBand == 0)
                     {
-                        result.NewGridOnBandOnMode = true;
+                        result.NewGridOnBand = true;
+                    }
+                    else
+                    {
+                        int qsosWithThatGridOnThatBandInThisMode = int.Parse(HttpGet($"gridsquare_worked/{gridSquare}/{band}m/{mode}"));
+                        if (qsosWithThatGridOnThatBandInThisMode == 0)
+                        {
+                            result.NewGridOnBandOnMode = true;
+                        }
                     }
                 }
             }

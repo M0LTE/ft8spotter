@@ -1,5 +1,4 @@
-﻿using MySql.Data.MySqlClient;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -57,6 +56,13 @@ namespace ft8spotter
                 Console.WriteLine("You need to provide a Cloudlog URL, e.g. https://mycloudloginstance.net");
                 Console.WriteLine("in order for ft8spotter to check spots against Cloudlog. Please provide it now...");
                 string url = Console.ReadLine();
+
+                string dir = Path.GetDirectoryName(configFile);
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
                 File.WriteAllText(configFile, $"{urlKey}={url}");
             }
 
@@ -77,64 +83,110 @@ namespace ft8spotter
                     var ipep = new IPEndPoint(IPAddress.Loopback, 0);
 
                     byte[] msg = client.Receive(ref ipep);
-                    if (msg[11] == 0x02)
+
+                    if (ParseResult.Success != DecodeMessage.TryParse(msg, out DecodeMessage decodeMessage))
+                        continue;
+
+
+
+                    //if (msg[11] == 0x02)
+                    //{
+                    //string heardCall = GetHeardCall(msg);
+
+                    string heardCall = GetHeardCall(decodeMessage.Message);
+
+                    if (heardCall == null)
+                        continue;
+
+                    var entity = GetEntity(heardCall);
+
+                    string grid = GetGrid(msg);
+
+                    var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
+
+                    if (all || !Needed.No.Equals(needed))
                     {
-                        string heardCall = GetHeardCall(msg);
-
-                        if (heardCall == null)
-                            continue;
-
-                        var entity = GetEntity(heardCall);
-
-                        string grid = GetGrid(msg);
-
-                        var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
-
-                        if (all || !Needed.No.Equals(needed))
+                        if (sw.Elapsed > TimeSpan.FromSeconds(5))
                         {
-                            if (sw.Elapsed > TimeSpan.FromSeconds(5))
-                            {
-                                Console.WriteLine($"---  {DateTime.Now:HH:mm:ss}  --------------------------");
-                                sw.Restart();
-                            }
-
-                            var colBefore = Console.ForegroundColor;
-                            if (needed.NewCountryOnAnyBand)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Green;
-                            }
-                            else if (needed.NewCountryOnBand)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                            }
-                            else if (needed.NewCountryOnBandOnMode)
-                            {
-                                Console.ForegroundColor = ConsoleColor.DarkYellow;
-                            }
-                            else if (needed.NewGridOnAnyBand)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Red;
-                            }
-                            else if (needed.NewGridOnBand)
-                            {
-                                Console.ForegroundColor = ConsoleColor.Magenta;
-                            }
-                            else if (needed.NewGridOnBandOnMode)
-                            {
-                                Console.ForegroundColor = ConsoleColor.DarkRed;
-                            }
-                            WriteAtColumn(0, needed, 19);
-                            WriteAtColumn(19, heardCall, 10);
-                            WriteAtColumn(30, IsGrid(grid) ? grid : String.Empty, 4);
-                            WriteAtColumn(35, entity?.Adif, 3);
-                            WriteAtColumn(39, (entity?.Entity) ?? "Unknown", 50);
-                            
-                            Console.WriteLine();
-                            Console.ForegroundColor = colBefore;
+                            Console.WriteLine($"---  {DateTime.Now:HH:mm:ss}  --------------------------");
+                            sw.Restart();
                         }
+
+                        var colBefore = Console.ForegroundColor;
+                        if (needed.NewCountryOnAnyBand)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Green;
+                        }
+                        else if (needed.NewCountryOnBand)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                        }
+                        else if (needed.NewCountryOnBandOnMode)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        }
+                        else if (needed.NewGridOnAnyBand)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                        }
+                        else if (needed.NewGridOnBand)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Magenta;
+                        }
+                        else if (needed.NewGridOnBandOnMode)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkRed;
+                        }
+                        WriteAtColumn(0, needed, 19);
+                        WriteAtColumn(19, heardCall, 10);
+                        WriteAtColumn(30, decodeMessage.Snr, 4);
+                        WriteAtColumn(34, IsGrid(grid) ? grid : String.Empty, 4);
+                        WriteAtColumn(39, entity?.Adif, 3);
+                        WriteAtColumn(43, (entity?.Entity) ?? "Unknown", 50);
+
+                        Console.WriteLine();
+                        Console.ForegroundColor = colBefore;
                     }
                 }
             }
+        }
+
+        private static string GetHeardCall(string text)
+        {
+            string[] split = text.Split(' ');
+
+            string heard;
+            if (split.Length == 0)
+            {
+                heard = null;
+            }
+            else if (split.Length == 1)
+            {
+                heard = split[0];
+            }
+            else if (split.Length == 2)
+            {
+                heard = split[split.Length - 1];
+            }
+            else if (split.Length == 3)
+            {
+                heard = split[split.Length - 2];
+            }
+            else if (split.Length == 4)
+            {
+                heard = split[split.Length - 2];
+            }
+            else
+            {
+                heard = null;
+            }
+
+            if (heard != null)
+            {
+                heard = heard.Replace("<", "").Replace(">", "");
+            }
+
+            return heard;
         }
 
         private static void WriteAtColumn(int col, object heardCall, int max)
@@ -158,6 +210,51 @@ namespace ft8spotter
                 }
             }
             Console.Write(toWrite);
+        }
+
+        private static int GetSnr(byte[] msg, string call)
+        {
+            Console.WriteLine(call);
+
+            int cur = 0;
+            foreach (var batch in msg.Batch(8))
+            {
+                Console.Write(cur.ToString("00") + " ");
+                foreach (var b in batch)
+                {
+                    string bytestr = b.ToString("X").ToLower();
+
+                    if (bytestr.Length == 1)
+                    {
+                        bytestr = "0" + bytestr;
+                    }
+
+                    Console.Write(bytestr + " ");
+                }
+                Console.WriteLine();
+
+                Console.Write("   ");
+                foreach (var b in batch)
+                {
+                    char ch = (char)b;
+                    if (Char.IsLetterOrDigit(ch) || Char.IsPunctuation(ch) || Char.IsSymbol(ch) || (ch == ' '))
+                    {
+                        Console.Write(ch);
+                        Console.Write("  ");
+                    }
+                    else if (ch == 0)
+                    {
+                        Console.Write("   ");
+                    }
+                }
+                Console.WriteLine();
+                Console.WriteLine();
+                cur += 8;
+            }
+
+            Debugger.Break();
+
+            return 0;
         }
 
         private static string GetGrid(byte[] msg)
@@ -241,18 +338,6 @@ namespace ft8spotter
         }
 
         static string configFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ft8spotter", "config");
-        static string cs;
-        static IDbConnection GetConnection()
-        {
-            if (cs == null)
-            {
-                Dictionary<string, string> configSettings = GetConfig();
-
-                cs = configSettings[connectionStringKey];
-            }
-
-            return new MySqlConnection(cs);
-        }
 
         private static Dictionary<string, string> config;
         private static Dictionary<string, string> GetConfig()
@@ -545,38 +630,6 @@ namespace ft8spotter
 
         static string GetHeardCall(byte[] msg)
         {
-            /*int cur = 0;
-            foreach (var batch in msg.Batch(8))
-            {
-                Console.Write(cur.ToString("00") + " ");
-                foreach (var b in batch)
-                {
-                    string bytestr = b.ToString("X").ToLower();
-
-                    if (bytestr.Length == 1)
-                    {
-                        bytestr = "0" + bytestr;
-                    }
-
-                    Console.Write(bytestr + " ");
-                }
-                Console.WriteLine();
-
-                Console.Write("   ");
-                foreach (var b in batch)
-                {
-                    char ch = (char)b;
-                    if (Char.IsLetterOrDigit(ch) || Char.IsPunctuation(ch) || Char.IsSymbol(ch) || (ch == ' '))
-                    {
-                        Console.Write(ch);
-                        Console.Write("  ");
-                    }
-                }
-                Console.WriteLine();
-                Console.WriteLine();
-                cur += 8;
-            }*/
-
             string text;
             try
             {
@@ -592,40 +645,7 @@ namespace ft8spotter
                 return null;
             }
 
-            string[] split = text.Split(' ');
-
-            string heard;
-            if (split.Length == 0)
-            {
-                heard = null;
-            }
-            else if (split.Length == 1)
-            {
-                heard = split[0];
-            }
-            else if (split.Length == 2)
-            {
-                heard = split[split.Length - 1];
-            }
-            else if (split.Length == 3)
-            {
-                heard = split[split.Length - 2];
-            }
-            else if (split.Length == 4)
-            {
-                heard = split[split.Length - 2];
-            }
-            else
-            {
-                heard = null;
-            }
-
-            if (heard != null)
-            {
-                heard = heard.Replace("<", "").Replace(">", "");
-            }
-
-            return heard;
+            return GetHeardCall(text);
         }
     }
 

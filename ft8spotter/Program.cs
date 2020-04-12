@@ -46,8 +46,8 @@ namespace ft8spotter
             if (args.Any(a => a == "--help" || a == "-h" || a == "/?"))
             {
                 Console.WriteLine(@"A work in progress, that listens to udp://localhost:2237 for WSJT-X, works out the DXCC entity of every call 
-                                    heard using Clublog's cty.xml, then queries a Cloudlog MySQL database directly (because there's no API yet)
-                                    to see if it's a needed slot. If it is, it highlights the call in red in the console window.");
+heard using Clublog's cty.xml, then queries a Cloudlog instance via its API to see if it's a needed slot. If
+it is, it highlights the call in red in the console window.");
                 return;
             }
 

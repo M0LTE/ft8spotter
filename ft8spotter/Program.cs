@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -70,7 +71,37 @@ it is, it highlights the call in red in the console window.");
 
             cloudLogUri = new Uri(new Uri(config[urlKey]), "index.php/api/");
 
-            ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
+            var fi = new FileInfo("cty.xml");
+
+            bool isFresh = false;
+            if (DateTime.Now - fi.LastWriteTime > TimeSpan.FromDays(1))
+            {
+                var wc = new WebClient();
+                wc.DownloadFile("https://cdn.clublog.org/cty.php?api=a11c3235cd74b88212ce726857056939d52372bd&zip=1", "cty_new.xml.zip");
+                if (File.Exists("cty.xml.bak"))
+                {
+                    File.Delete("cty.xml.bak");
+                }
+                File.Move("cty.xml", "cty.xml.bak");
+                ZipFile.ExtractToDirectory("cty_new.xml.zip", ".");
+                isFresh = true;
+                File.Delete("cty_new.xml.zip");
+            }
+
+            try
+            {
+                ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
+            }
+            catch (Exception ex)
+            {
+                if (isFresh)
+                {
+                    File.Delete("cty.xml");
+                    File.Move("cty.xml.bak", "cty.xml");
+                    Console.WriteLine("Failed to update cty.xml");
+                    ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
+                }
+            }
 
             const int port = 2237;
             using (var client = new UdpClient(port, AddressFamily.InterNetwork))

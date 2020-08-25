@@ -1,13 +1,13 @@
-﻿using System;
+﻿using M0LTE.WsjtxUdpLib.Client;
+using M0LTE.WsjtxUdpLib.Messages.Out;
+using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
@@ -21,6 +21,10 @@ namespace ft8spotter
         static ClublogCtyXml ctyXml;
         static void Main(string[] args)
         {
+            httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd("ft8spotter");
+
+            bool multicast = GetAndConsumeArg(args, "--multicast");
+
             bool all = args.Any(a => a == "--all");
 
             bool grids = args.Any(a => a == "--grids");
@@ -98,88 +102,98 @@ it is, it highlights the call in red in the console window.");
                 {
                     File.Delete("cty.xml");
                     File.Move("cty.xml.bak", "cty.xml");
-                    Console.WriteLine("Failed to update cty.xml");
+                    Console.WriteLine($"Failed to update cty.xml: {ex.Message}");
                     ctyXml = ClublogCtyXml.Parse(File.ReadAllText("cty.xml"));
                 }
             }
 
-            const int port = 2237;
-            using (var client = new UdpClient(port, AddressFamily.InterNetwork))
+            WsjtxClient wsjsxClient;
+            if (multicast)
             {
-                Console.WriteLine($"Listening for WSJT-X on UDP port {port}");
+                //TODO: make hard-coded group an argument
+                wsjsxClient = new WsjtxClient(Callback, IPAddress.Parse("239.1.2.3"), multicast: true);
+            }
+            else
+            {
+                wsjsxClient = new WsjtxClient(Callback, IPAddress.Loopback);
+            }
+
+            Console.WriteLine($"Listening for WSJT-X");
+
+            Thread.CurrentThread.Join();
+
+            void Callback(WsjtxMessage wsjtxMessage)
+            {
+                if (!(wsjtxMessage is DecodeMessage decodeMessage))
+                {
+                    return;
+                }
 
                 var sw = Stopwatch.StartNew();
-                while (true)
+                string heardCall = GetHeardCall(decodeMessage.Message);
+
+                if (heardCall == null)
                 {
-                    var ipep = new IPEndPoint(IPAddress.Loopback, 0);
+                    return;
+                }
 
-                    byte[] msg = client.Receive(ref ipep);
+                var entity = GetEntity(heardCall);
 
-                    if (ParseResult.Success != DecodeMessage.TryParse(msg, out DecodeMessage decodeMessage))
-                        continue;
+                string grid = GetGrid(decodeMessage.Datagram);
 
+                var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
 
-
-                    //if (msg[11] == 0x02)
-                    //{
-                    //string heardCall = GetHeardCall(msg);
-
-                    string heardCall = GetHeardCall(decodeMessage.Message);
-
-                    if (heardCall == null)
-                        continue;
-
-                    var entity = GetEntity(heardCall);
-
-                    string grid = GetGrid(msg);
-
-                    var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
-
-                    if (all || !Needed.No.Equals(needed))
+                if (all || !Needed.No.Equals(needed))
+                {
+                    if (sw.Elapsed > TimeSpan.FromSeconds(5))
                     {
-                        if (sw.Elapsed > TimeSpan.FromSeconds(5))
-                        {
-                            Console.WriteLine($"---  {DateTime.Now:HH:mm:ss}  --------------------------");
-                            sw.Restart();
-                        }
-
-                        var colBefore = Console.ForegroundColor;
-                        if (needed.NewCountryOnAnyBand)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Green;
-                        }
-                        else if (needed.NewCountryOnBand)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                        }
-                        else if (needed.NewCountryOnBandOnMode)
-                        {
-                            Console.ForegroundColor = ConsoleColor.DarkYellow;
-                        }
-                        else if (needed.NewGridOnAnyBand)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Red;
-                        }
-                        else if (needed.NewGridOnBand)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Magenta;
-                        }
-                        else if (needed.NewGridOnBandOnMode)
-                        {
-                            Console.ForegroundColor = ConsoleColor.DarkRed;
-                        }
-                        WriteAtColumn(0, needed, 19);
-                        WriteAtColumn(19, heardCall, 10);
-                        WriteAtColumn(30, decodeMessage.Snr, 4);
-                        WriteAtColumn(34, IsGrid(grid) ? grid : String.Empty, 4);
-                        WriteAtColumn(39, entity?.Adif, 3);
-                        WriteAtColumn(43, (entity?.Entity) ?? "Unknown", 50);
-
-                        Console.WriteLine();
-                        Console.ForegroundColor = colBefore;
+                        Console.WriteLine($"---  {DateTime.Now:HH:mm:ss}  --------------------------");
+                        sw.Restart();
                     }
+
+                    var colBefore = Console.ForegroundColor;
+                    if (needed.NewCountryOnAnyBand)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                    }
+                    else if (needed.NewCountryOnBand)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                    }
+                    else if (needed.NewCountryOnBandOnMode)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    }
+                    else if (needed.NewGridOnAnyBand)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                    }
+                    else if (needed.NewGridOnBand)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Magenta;
+                    }
+                    else if (needed.NewGridOnBandOnMode)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkRed;
+                    }
+                    WriteAtColumn(0, needed, 19);
+                    WriteAtColumn(19, heardCall, 10);
+                    WriteAtColumn(30, decodeMessage.Snr, 4);
+                    WriteAtColumn(34, IsGrid(grid) ? grid : String.Empty, 4);
+                    WriteAtColumn(39, entity?.Adif, 3);
+                    WriteAtColumn(43, (entity?.Entity) ?? "Unknown", 50);
+
+                    Console.WriteLine();
+                    Console.ForegroundColor = colBefore;
                 }
             }
+        }
+
+        private static bool GetAndConsumeArg(string[] args, string v)
+        {
+            bool present = args.Contains(v);
+            args = args.Where(a => a != v).ToArray();
+            return present;
         }
 
         private static string GetHeardCall(string text)
@@ -231,7 +245,11 @@ it is, it highlights the call in red in the console window.");
             else
             {
                 string str = heardCall.ToString();
-                if (str.Length <= max)
+                if (str == null)
+                {
+                    toWrite = "";
+                }
+                else if (str.Length <= max)
                 {
                     toWrite = str;
                 }
@@ -241,51 +259,6 @@ it is, it highlights the call in red in the console window.");
                 }
             }
             Console.Write(toWrite);
-        }
-
-        private static int GetSnr(byte[] msg, string call)
-        {
-            Console.WriteLine(call);
-
-            int cur = 0;
-            foreach (var batch in msg.Batch(8))
-            {
-                Console.Write(cur.ToString("00") + " ");
-                foreach (var b in batch)
-                {
-                    string bytestr = b.ToString("X").ToLower();
-
-                    if (bytestr.Length == 1)
-                    {
-                        bytestr = "0" + bytestr;
-                    }
-
-                    Console.Write(bytestr + " ");
-                }
-                Console.WriteLine();
-
-                Console.Write("   ");
-                foreach (var b in batch)
-                {
-                    char ch = (char)b;
-                    if (Char.IsLetterOrDigit(ch) || Char.IsPunctuation(ch) || Char.IsSymbol(ch) || (ch == ' '))
-                    {
-                        Console.Write(ch);
-                        Console.Write("  ");
-                    }
-                    else if (ch == 0)
-                    {
-                        Console.Write("   ");
-                    }
-                }
-                Console.WriteLine();
-                Console.WriteLine();
-                cur += 8;
-            }
-
-            Debugger.Break();
-
-            return 0;
         }
 
         private static string GetGrid(byte[] msg)

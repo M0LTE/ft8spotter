@@ -8,7 +8,7 @@ namespace ft8spotter
 {
     public class ClublogCtyXml
     {
-        internal const string ClublogNamespace = "https://clublog.org/cty/v1.2";
+        //internal const string ClublogNamespace = "https://clublog.org/cty/v1.2";
 
         public DateTime Updated { get; set; }
         public Entity[] Entities { get; set; }
@@ -33,9 +33,16 @@ namespace ft8spotter
             return result;
         }
 
-        private static T[] Fetch<T>(XDocument xDocument, string parent, string elementName, Func<XElement, T> parse) => xDocument.Element(XName.Get("clublog", ClublogNamespace))
-                                                                                                        .Descendants(XName.Get(parent, ClublogNamespace))
-                                                                                                        .Descendants(XName.Get(elementName, ClublogNamespace))
+        static string GetNamespace(XDocument doc)
+        {
+            var ns = doc.Root.GetDefaultNamespace()?.NamespaceName;
+
+            return ns;
+        }
+
+        private static T[] Fetch<T>(XDocument xDocument, string parent, string elementName, Func<XElement, T> parse) => xDocument.Element(XName.Get("clublog", GetNamespace(xDocument)))
+                                                                                                        .Descendants(XName.Get(parent, GetNamespace(xDocument)))
+                                                                                                        .Descendants(XName.Get(elementName, GetNamespace(xDocument)))
                                                                                                         .Select(parse)
                                                                                                         .ToArray();
 
@@ -85,7 +92,7 @@ namespace ft8spotter
 
         internal static string GetString(XElement xe, string elementName)
         {
-            return xe.Element(XName.Get(elementName, ClublogCtyXml.ClublogNamespace))?.Value;
+            return xe.Element(XName.Get(elementName, GetNamespace(xe.Document)))?.Value;
         }
 
         internal static int? GetNullableInt(XElement xe, string v)

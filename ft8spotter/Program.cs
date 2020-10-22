@@ -1,4 +1,5 @@
-﻿using M0LTE.WsjtxUdpLib.Client;
+﻿using AmateurBandLib;
+using M0LTE.WsjtxUdpLib.Client;
 using M0LTE.WsjtxUdpLib.Messages.Out;
 using System;
 using System.Collections.Generic;
@@ -19,6 +20,7 @@ namespace ft8spotter
         private const string urlKey = "cloudlog_url";
 
         static ClublogCtyXml ctyXml;
+        static int bandMetres;
         static void Main(string[] args)
         {
             httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd("ft8spotter");
@@ -28,15 +30,6 @@ namespace ft8spotter
             bool all = args.Any(a => a == "--all");
 
             bool grids = args.Any(a => a == "--grids");
-
-            string bandArg = args.SingleOrDefault(a => a.EndsWith("m"));
-
-            if (string.IsNullOrWhiteSpace(bandArg) || !int.TryParse(bandArg.Substring(0, bandArg.Length - 1).Replace("--", ""), out int band))
-            {
-                band = 20;
-            }
-
-            Console.WriteLine($"Selected {band}m, specify (e.g.) --6m for another band");
 
             if (!all)
             {
@@ -124,7 +117,18 @@ it is, it highlights the call in red in the console window.");
 
             void Callback(WsjtxMessage wsjtxMessage)
             {
+                if (wsjtxMessage is StatusMessage statusMessage)
+                {
+                    ProcessStatusMessage(statusMessage);
+                    return;
+                }
+
                 if (!(wsjtxMessage is DecodeMessage decodeMessage))
+                {
+                    return;
+                }
+
+                if (bandMetres == 0)
                 {
                     return;
                 }
@@ -141,7 +145,7 @@ it is, it highlights the call in red in the console window.");
 
                 string grid = GetGrid(decodeMessage.Datagram);
 
-                var needed = entity == null ? Needed.No : GetNeeded(band, entity.Adif, grids ? grid : null, "ft8");
+                var needed = entity == null ? Needed.No : GetNeeded(bandMetres, entity.Adif, grids ? grid : null, "ft8");
 
                 if (all || !Needed.No.Equals(needed))
                 {
@@ -186,6 +190,23 @@ it is, it highlights the call in red in the console window.");
                     Console.WriteLine();
                     Console.ForegroundColor = colBefore;
                 }
+            }
+        }
+
+        private static void ProcessStatusMessage(StatusMessage statusMessage)
+        {
+            var band = AmateurBand.FromHz((long)statusMessage.DialFrequency);
+
+            if (band == null)
+            {
+                Console.WriteLine($"Not an amateur band: {statusMessage.DialFrequency / 1000000.0}MHz");
+                return;
+            }
+
+            if (int.TryParse(band.Name.Replace("m", ""), out int bm) && bm != bandMetres)
+            {
+                bandMetres = bm;
+                Console.WriteLine($"Switched to {band.Name}");
             }
         }
 
